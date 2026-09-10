@@ -1,0 +1,50 @@
+# 可复现性 CI：每 push / PR 自动验证「发布的数字都能复现」。
+#
+# 设计说明：
+# - 全部验收判据为确定性操作计数（同 seed 逐位一致），墙钟只作保险丝不进判据，
+#   因此 CI 在 2 核托管 runner 上跑缩减局数仍等价——通过/失败判定与本地 100 局同源；
+# - bench:dyn 100 局用于验收报告数字，CI 用 20 局同 seed 序列（7000..7019）做回归门；
+# - 大样本（A2 矩阵 / scale / shadow 100 局）不在 CI 跑：耗时超托管 runner 预算，
+#   由 README 中的完整命令在本地复现。
+name: reproducible-ci
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck (src + scripts, strict)
+        run: npx tsc --noEmit
+
+      - name: Build (dist/index.html single file)
+        run: npm run build
+
+      - name: Property test (10^4 ops, invariants per op)
+        run: npx tsx scripts/property-test.ts 10000 42
+
+      - name: Fault injection (40 games + coverage probes)
+        run: npx tsx scripts/fault-test.ts 40 8000
+
+      - name: Shadow refinement (8 games, four-layer assertions)
+        run: npx tsx scripts/shadow-test.ts 8 9000
+
+      - name: b-engine unit acceptance (2-factor, 50 layouts)
+        run: npx tsx scripts/twofactor-test.ts 50 7000
+
+      - name: Dynamic benchmark gate (20 seeds, deterministic win-rate/p99 verdict)
+        run: npx tsx scripts/bench-dyn.ts 20 7000

@@ -1,0 +1,42 @@
+{
+  "name": "perfect-snake-ai-lab",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "bench:static": "tsx scripts/bench.ts all 10 1000",
+    "bench:dyn": "tsx scripts/bench-dyn.ts 100 7000",
+    "test:property": "tsx scripts/property-test.ts 10000 42",
+    "test:shadow": "tsx scripts/shadow-test.ts 8 9000",
+    "test:fault": "tsx scripts/fault-test.ts 40 8000",
+    "test:a2": "tsx scripts/bench-dyn.ts 100 7000 --a2",
+    "test:twofactor": "tsx scripts/twofactor-test.ts 50 7000",
+    "verify": "npm run typecheck && npm run test:property && npm run test:fault && npm run bench:dyn"
+  },
+  "dependencies": {
+    "clsx": "2.1.1",
+    "react": "19.2.6",
+    "react-dom": "19.2.6",
+    "tailwind-merge": "3.4.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "4.1.17",
+    "@types/node": "22.19.17",
+    "@types/react": "19.2.7",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "5.1.1",
+    "tailwindcss": "4.1.17",
+    "typescript": "5.9.3",
+    "vite": "7.3.2",
+    "vite-plugin-singlefile": "2.3.0",
+    "tsx": "^4.23.13"
+  },
+  "description": "贪吃蛇完美通关 AI：哈密顿回路 + 单调序捷径（可证明 100% 通关）+ 动态障碍增量维护 + certifying 校验器。含 6 个可复现验收脚本。",
+  "engines": {
+    "node": ">=20"
+  }
+}
