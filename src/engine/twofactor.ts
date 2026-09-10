@@ -583,9 +583,18 @@ export class TwoFactorCycle {
       // 事件耗时重尾来源；超限 = 本轮无路 → rebuild 兜底（O(N) 有界，正确性不变）。
       let progressed = false;
       for (const s of active) {
+        // 前面的 flip 会改变本轮后续源点的图状态：源可能已被别人的增广路补满。
+        // 翻转前必须重新校验源仍是亏格——否则 findAugmentingPath 从满格出发，
+        // 接入「缺失边」时该格无空槽，linkCells 会覆盖另一条已有链接的槽位，
+        // 产生单向链接（链接不对称，实测 s7011 e36 532-562）。
+        if (!this.present[s] || this.deg(s) >= 2) continue;
         const path = this.findAugmentingPath(s, -1, 60);
         // 长度 ≥2：相邻亏格对的直接缺失边即合法增广（两端各 +1 度）
         if (!path || path.length < 2 || path[0] !== s) continue;
+        // 二次防御：终点也必须仍是亏格（时序竞争：终点被先行路径补满后，翻转
+        // 会让它超 2 度或覆盖槽位）。
+        const t = path[path.length - 1];
+        if (t !== s && this.present[t] && this.deg(t) >= 2) continue;
         this.flipPath(path);
         progressed = true;
       }
