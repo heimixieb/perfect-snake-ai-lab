@@ -1,5 +1,7 @@
 # 贪吃蛇算法实验室｜Perfect Snake AI Lab
 
+<p align="right"><strong>简体中文</strong> · <a href="README_EN.md">English</a></p>
+
 [![CI](https://github.com/heimixieb/perfect-snake-ai-lab/actions/workflows/ci.yml/badge.svg)](https://github.com/heimixieb/perfect-snake-ai-lab/actions/workflows/ci.yml)
 [![在线体验](https://img.shields.io/badge/在线体验-GitHub%20Pages-10b981?logo=github)](https://heimixieb.github.io/perfect-snake-ai-lab/)
 [![GitHub stars](https://img.shields.io/github/stars/heimixieb/perfect-snake-ai-lab?style=flat&logo=github)](https://github.com/heimixieb/perfect-snake-ai-lab/stargazers)

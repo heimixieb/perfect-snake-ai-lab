@@ -2,7 +2,7 @@
   "name": "perfect-snake-ai-lab",
   "private": true,
   "version": "1.0.0",
-  "description": "贪吃蛇算法 / Snake AI：用哈密顿回路、路径规划和动态障碍，在规则地图上安全吃满棋盘的 TypeScript 实验室。",
+  "description": "贪吃蛇算法实验室 / Snake AI Lab：哈密顿回路、路径规划与动态障碍的可复现 TypeScript 实验。",
   "keywords": [
     "snake-ai",
     "hamiltonian-cycle",
