@@ -3,4 +3,5 @@ dist/
 *.log
 待办清单.md
 .playwright-cli/
+output/
 tla/states/

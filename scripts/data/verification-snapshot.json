@@ -1,0 +1,10 @@
+{
+  "date": "2026-09-11",
+  "scenario": "extreme-dyn",
+  "runs": 20,
+  "wins": 20,
+  "safetyFailures": 0,
+  "pooledP99Ms": 0.8927,
+  "worstEpisodeP99Ms": 1.0383,
+  "overBudgetPercent": 0.027
+}

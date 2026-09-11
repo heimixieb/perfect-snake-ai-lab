@@ -20,8 +20,8 @@ export default function App() {
           <div className="flex items-center gap-3">
             <div className="grid h-9 w-9 place-items-center rounded-lg bg-gradient-to-br from-emerald-400 to-teal-600 text-lg shadow-lg shadow-emerald-500/20">🐍</div>
             <div>
-              <h1 className="text-base font-bold leading-tight">Perfect Snake AI Lab <span className="ml-1 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-medium text-emerald-300">融合版</span></h1>
-              <p className="text-[11px] text-slate-400">A* / BFS · 最长路径 · 哈密顿回路 · 时间感知安全判定 · 完美通关研究与验收</p>
+              <h1 className="text-base font-bold leading-tight">贪吃蛇算法实验室 <span className="ml-1 text-xs font-medium text-emerald-300">Perfect Snake AI Lab</span></h1>
+              <p className="text-[11px] text-slate-400">比较 Snake AI、路径规划、哈密顿回路与动态障碍策略</p>
             </div>
           </div>
           <nav className="ml-auto flex gap-1 rounded-lg bg-slate-800 p-1">

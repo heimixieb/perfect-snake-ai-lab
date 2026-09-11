@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://heimixieb.github.io/perfect-snake-ai-lab/sitemap.xml

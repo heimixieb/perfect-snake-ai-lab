@@ -25,6 +25,7 @@ const FAIL_TEXT: Record<string, string> = {
   obstacle: '撞到障碍',
   starved: '长期未进食（死循环）',
   'no-move': '无可行移动（被困）',
+  maintenance: '动态路线维护失败',
   'step-limit': '超过步数上限',
 };
 

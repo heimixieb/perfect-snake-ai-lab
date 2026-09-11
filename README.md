@@ -1,125 +1,115 @@
-# Perfect Snake AI Lab
+# 贪吃蛇算法实验室｜Perfect Snake AI Lab
 
 [![CI](https://github.com/heimixieb/perfect-snake-ai-lab/actions/workflows/ci.yml/badge.svg)](https://github.com/heimixieb/perfect-snake-ai-lab/actions/workflows/ci.yml)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![在线体验](https://img.shields.io/badge/在线体验-GitHub%20Pages-10b981?logo=github)](https://heimixieb.github.io/perfect-snake-ai-lab/)
+[![GitHub stars](https://img.shields.io/github/stars/heimixieb/perfect-snake-ai-lab?style=flat&logo=github)](https://github.com/heimixieb/perfect-snake-ai-lab/stargazers)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-> 不只让蛇吃满棋盘，还要能回答：**为什么安全、失败在哪里、数字怎样复现。**
+这是一个可以在线玩的**贪吃蛇算法**实验室：比较不同的**贪吃蛇 AI**（Snake AI）怎样找食物、怎样做**路径规划**，以及怎样用**哈密顿回路**应对规则地图；项目还包含会变化的**动态障碍**场景。
 
-一个可交互、可测试、可做实验的贪吃蛇算法实验室。项目把哈密顿回路、单调序捷径、动态障碍维护、2-factor 修复和独立影子校验放进同一套无 DOM 引擎，并用固定 seed 的命令行实验与 CI 检查结果。
+[![贪吃蛇 AI 沿覆盖全部格子的环形路线，从短蛇逐渐吃满棋盘](docs/assets/snake-fill.gif)](https://heimixieb.github.io/perfect-snake-ai-lab/)
 
-English: a reproducible, certifying Snake-AI lab for static and changing grids. The UI is the demo; the headless engine and verification scripts are the product.
+<p align="center">
+  <a href="https://heimixieb.github.io/perfect-snake-ai-lab/"><strong>▶ 立即在线体验</strong></a>
+  ·
+  <a href="docs/RESEARCH.md">阅读完整研究报告</a>
+</p>
 
-![动态障碍场景中的 Hamilton AI、回路与不变量监控](docs/assets/live-demo.png)
+## 它到底是什么？
+
+这是一个会自己玩贪吃蛇的网页实验室。你可以让几种不同的电脑玩家挑战同一张地图，看看谁更安全、谁更快、谁能吃得更多。
+
+- 支持直接找食物、安全找路、固定环形路线、自动选择路线和手动操作。
+- 在能铺出完整环形路线的规则地图上，基础走法有明确的安全理由。
+- 可以观看障碍提前出现预告、路线重新安排和蛇绕开危险区域。
+- 内置统一比赛和自动检查，不只展示最好看的一局。
+- 所有随机地图都能用同一个数字重新生成，方便别人核对结果。
+
+## 它是怎么通关的？
+
+想象棋盘上有一条经过所有格子的环形跑道。蛇只要一直沿着跑道前进，头部就不会突然撞上自己的身体，因为尾巴会在前方到达之前逐渐让出位置。
+
+程序先画好这条跑道，再让蛇沿着它找食物。遇到确认安全的机会时，蛇可以抄近路；如果近路可能把自己困住，它就继续走原来的跑道。
+
+## 怎么知道它真的有效？
+
+项目不是只录一局成功视频，而是做了四层检查：
+
+1. **先检查路线**：路线必须经过目标格子，每一步都必须走到相邻格子。
+2. **变化前先试走**：地图变化时，先在备用路线里检查，确认没有问题才正式换过去。
+3. **再找一位“检查员”**：另一段独立代码重新计算，避免主程序自己检查自己时一起犯错。
+4. **反复制造麻烦**：自动生成随机变化，还故意让重建失败、让电脑变慢，确认程序会安全停止或继续运行。
+
+每次提交代码，GitHub 都会自动运行这些检查。当前验证快照包含 10,001 次随机路线检查、200 局故障测试和 20 局动态地图测试；详细命令与边界见 [验证快照](docs/benchmarks.md)。
+
+![不同贪吃蛇走法在规则地图上的通关率对比](docs/assets/strategy-comparison.svg)
+
+![动态障碍场景的通关、安全失败和步骤耗时摘要](docs/assets/dynamic-verification.svg)
+
+## 有哪些限制？
+
+- “安全吃满”只适用于能够铺出完整环形路线的规则地图，不是任意地图都成立。
+- 随机单格障碍可能把地图切成无法全部走遍的形状，此时程序只能尽量多吃。
+- 动态障碍必须提前通知，而且当前程序可以拒绝一部分太危险的变化。
+- “20 局全部成功”只是这 20 个样本的结果，不代表所有动态地图都不会失败。
+- 运行速度会受电脑、浏览器和后台程序影响，因此时间数据不能跨机器逐位相同。
 
 ## 30 秒开始
 
 需要 Node.js 20 或更高版本。
 
 ```bash
+git clone https://github.com/heimixieb/perfect-snake-ai-lab.git
+cd perfect-snake-ai-lab
 npm ci
-npm run dev       # 打开交互演示
-npm run verify    # 类型检查、构建、性质测试、影子校验、故障注入、动态正确性门
+npm run dev
 ```
 
-只想看算法跑一轮：
+运行全部自动检查：
 
 ```bash
-npx tsx scripts/bench-dyn.ts 10 7000 --correctness-only
+npm run verify
 ```
 
-## 为什么这个仓库值得看
-
-- **可证明的安全骨架**：能构造回路时，蛇身沿单调弧前进；捷径只有在不越过尾部安全裕量时才启用。
-- **真的会变化的地图**：障碍经历“候选 → 预约 → 落地/解除 → 回路重建”，不是预生成的静态关卡。
-- **先验证，再提交**：动态回路在候选数组上完成邻接、唯一性与单环检查，成功后才原子替换正式状态。
-- **第二只眼**：影子实现从当前网格独立重建，检查支持集、单环、蛇身单调弧与参考回路可构造性。
-- **失败也有名字**：碰撞、无合法移动、饥饿、维护失败和步数上限分开记录；不会把超时悄悄算成成功。
-- **正确性和性能分门**：CI 使用确定性正确性门；墙钟性能在固定硬件上单独验收，避免共享 runner 抖动制造假回归。
-
-## 目前究竟证明了什么
-
-项目刻意区分“性质”“诊断指标”和“实验结果”：
-
-| 名称 | 精确定义 | 是否作为正确性门 |
-|---|---|---:|
-| `win` | 蛇长达到**当前**自由格数 | 是 |
-| 安全 S | 不撞墙、自身、障碍，不产生非法移动或维护失败 | 是 |
-| 初始容量比例 | `finalLength / initialFreeCount` | 否，未提供 `structural_L` 证书时只是诊断量 |
-| 到期快照可达性 | 食物 TTL 到期时，在当前静态快照中是否可达 | 否，它不是“不饿死”证明 |
-| V 覆盖率 | `visited ∩ 当前自由集 / 当前自由集` | 报告 |
-| pooled 决策 p99 | 合并全部决策样本后计算 p99 | 本地性能门；CI 仅报告 |
-
-这一区分很重要：动态障碍减少自由格会降低当前棋盘的胜利目标；静态连通也不代表食物一定能在 TTL 内吃到。仓库不会把两者包装成更强的定理。
-
-## 动态对手模型
-
-- **A1**：危险候选可被调度器过滤，带预约期。
-- **A2-like**：允许靠近蛇头的候选，并检查逃逸集、预告期和落地后连通性。
-- **严格 A2 尚未实现**：当前维护器仍可拒绝一个通过公平性检查的候选。
-
-所有动态基准都会打印完整漏斗：抽样数、环境过滤、公平性过滤、策略拒绝、预约、提交、回滚和解除放弃。因此，“成功落地很多次”不会掩盖前置拒绝。
+重新生成首页 GIF 和数据图：
 
 ```bash
-npx tsx scripts/bench-dyn.ts 20 7000 --a2 --correctness-only
-npx tsx scripts/a2-matrix.ts 10 7000
+npm run assets
 ```
 
-## 验证矩阵
+## 截图
 
-| 命令 | 检查内容 |
+| 规则地图：沿环形路线前进 | 动态地图：障碍提前预告 |
 |---|---|
-| `npm run typecheck` | `src/` 与 `scripts/` 的严格 TypeScript 检查 |
-| `npm run build` | 生成单文件 Web 应用 `dist/index.html` |
-| `npm run test:property` | 随机增删宏格后检查单环、序号、支持集和覆盖 |
-| `npm run test:shadow` | 独立重建与四层 refinement 检查 |
-| `npm run test:fault` | 重建失败、单调弧拒绝、强制降级、极端时钟等故障注入 |
-| `npm run test:twofactor` | 2-factor 求解、圈合并与增量修复专项验收 |
-| `npm run bench:dyn` | 100 seeds 动态正确性 + 本机性能门 |
-| `npm run bench:dyn:correctness` | 20 seeds 动态正确性门，墙钟仅报告 |
+| ![规则地图上的贪吃蛇环形路线](docs/assets/static-demo.png) | ![动态障碍地图上的贪吃蛇 AI](docs/assets/dynamic-demo.png) |
 
-固定 seed 保证事件序列和逻辑结果可复现；耗时仍受 CPU、JIT（即时编译）、GC（垃圾回收）与系统负载影响。
+![在网页中比较不同贪吃蛇算法的基准测试面板](docs/assets/benchmark-panel.png)
 
-本次候选版本的完整验证已通过：A1 动态场景 20/20 局通关、0 个安全失败，pooled 决策 p99 为 0.8927ms；硬件、命令、事件筛选漏斗与 2-factor 差分结果见 [验证快照](docs/benchmarks.md)。这些是给定环境和样本的实验结果，不是总体成功率证明。
+<details>
+<summary><strong>想继续深挖算法和证明？</strong></summary>
 
-## 架构
+这个项目的技术名称包括：图搜索、哈密顿回路、单调顺序捷径、动态路线重建、2-factor 实验引擎、性质测试、故障注入和影子验证。
 
-```text
-src/engine/            无 DOM 核心，可在浏览器与 Node.js 复用
-├── game.ts            状态机、碰撞、食物与指标
-├── hamilton.ts        静态哈密顿回路构造
-├── dyn.ts             动态回路、事务提交、调度器与降级控制
-├── twofactor.ts       2-factor 求解、圈合并与局部修复
-├── strategies.ts      策略组合与安全捷径
-└── shadow.ts          独立参考校验器
+- [完整研究报告](docs/RESEARCH.md)：原网页报告的 0–10 节 Markdown 版本。
+- [验证语义](docs/verification.md)：每个指标究竟能证明什么、不能证明什么。
+- [架构说明](docs/architecture.md)：游戏引擎、网页和测试脚本怎样分工。
+- [验证快照](docs/benchmarks.md)：机器、命令、样本数和最新公开结果。
 
-src/components/        交互演示、基准面板与研究报告
-scripts/               可复现实验和验收入口
-.github/workflows/     GitHub Actions 正确性门
-```
-
-更多细节见 [验证语义](docs/verification.md)、[架构说明](docs/architecture.md)、[验证快照](docs/benchmarks.md) 和 [贡献指南](CONTRIBUTING.md)。
-
-## 已知边界
-
-- 任意单格障碍上的哈密顿路径问题在一般情形下很难；这里的启发式实验不能由 NP-完备性直接解释。
-- 奇数顶点的二分网格图不存在覆盖全部顶点的哈密顿回路；“累计访问全部格”不等于“同时吃满”。
-- 当前经典动态引擎使用 O(N) 全量重建；这只是本实现选择，不宣称是所有维护模型中唯一正确的方法。
-- 第三方 DQN 与图搜索数字来自不同规则，不能推出“强化学习不适用”。本项目只是优先选择更容易构造和检查安全不变量的图算法。
-- A2-like 仍有策略拒绝；严格承诺落地、逃逸锁定与对应活性证明列在路线图中。
+</details>
 
 ## 参与贡献
 
-欢迎提交新的构造器、反例、性质测试或可复现实验。涉及性能的 PR 请同时提交固定硬件信息、命令、seed 范围和原始摘要；涉及正确性声明的 PR 请明确它属于推导、运行时验证还是实验观察。
+欢迎提交新的走法、反例、测试或界面改进。开始前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)；发现安全问题请查看 [SECURITY.md](SECURITY.md)。
 
-请先阅读 [CONTRIBUTING.md](CONTRIBUTING.md) 与 [SECURITY.md](SECURITY.md)。
+## Star History
 
-## 致谢与参考
+[![Star History Chart](https://api.star-history.com/svg?repos=heimixieb/perfect-snake-ai-lab&type=Date)](https://star-history.com/#heimixieb/perfect-snake-ai-lab&Date)
+
+## 致谢
 
 - John Tapsell 的 Hamiltonian Snake 思路
 - `chuyangliu/snake` 的图搜索策略实现
-- Itai、Papadimitriou、Szwarcfiter 关于网格图哈密顿问题的经典工作
-- R. Gould 关于动态图哈密顿问题的综述
+- 研究网格路线问题的经典论文与动态图综述
 
 ## License
 

@@ -2,7 +2,7 @@
   "name": "perfect-snake-ai-lab",
   "private": true,
   "version": "1.0.0",
-  "description": "A reproducible lab for certifying Snake AI on static and changing grids.",
+  "description": "贪吃蛇算法 / Snake AI：用哈密顿回路、路径规划和动态障碍，在规则地图上安全吃满棋盘的 TypeScript 实验室。",
   "keywords": [
     "snake-ai",
     "hamiltonian-cycle",
@@ -15,7 +15,7 @@
     "type": "git",
     "url": "git+https://github.com/heimixieb/perfect-snake-ai-lab.git"
   },
-  "homepage": "https://github.com/heimixieb/perfect-snake-ai-lab#readme",
+  "homepage": "https://heimixieb.github.io/perfect-snake-ai-lab/",
   "bugs": {
     "url": "https://github.com/heimixieb/perfect-snake-ai-lab/issues"
   },
@@ -33,6 +33,10 @@
     "test:fault": "tsx scripts/fault-test.ts 40 8000",
     "test:a2": "tsx scripts/bench-dyn.ts 100 7000 --a2",
     "test:twofactor": "tsx scripts/twofactor-test.ts 50 7000",
+    "assets:gif": "tsx scripts/render-demo-gif.ts",
+    "assets:charts": "tsx scripts/render-doc-charts.ts",
+    "assets": "npm run assets:gif && npm run assets:charts",
+    "docs:research": "tsx scripts/render-research.tsx",
     "verify": "npm run typecheck && npm run build && npm run test:property && npm run test:shadow && npm run test:fault && npm run test:twofactor && npm run bench:dyn:correctness"
   },
   "dependencies": {
@@ -47,11 +51,12 @@
     "@types/react": "19.2.7",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "5.1.1",
+    "gifenc": "1.0.3",
     "tailwindcss": "4.1.17",
+    "tsx": "^4.23.13",
     "typescript": "5.9.3",
     "vite": "7.3.2",
-    "vite-plugin-singlefile": "2.3.0",
-    "tsx": "^4.23.13"
+    "vite-plugin-singlefile": "2.3.0"
   },
   "engines": {
     "node": ">=20"
