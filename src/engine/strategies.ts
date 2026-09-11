@@ -344,7 +344,7 @@ function hybrid(game: Game): Strategy {
 
 /* ------------------------------------------------------------------ */
 /* 5.5 动态障碍回路（极限难度 extreme-dyn）：                            */
-/*     宏格环缝合（同侧相邻拼接，无传送边）+ 预约位规避 + p99 降级安全优先 */
+/*     预约位规避 + 候选验证后提交的 O(N) 重建 + p99 保险丝降级             */
 /* ------------------------------------------------------------------ */
 function hamiltonDyn(game: Game): Strategy {
   const debug: StrategyDebug = { path: null, cycle: null, mode: '' };
@@ -492,12 +492,20 @@ function hamiltonDyn(game: Game): Strategy {
     : null;
   if (scheduler) {
     scheduler.onReserve = onReserve;
-    // 落地回调（grid 已 block）：正式重建一次，确保回路与新 grid 完全一致
-    scheduler.onBlocked = (macro: number): boolean => {
+    const validateCommittedView = (): boolean => {
       if (!coreDyn) return false;
-      const occ = game.occ;
-      return coreDyn.removeBlock(macro, (c) => occ[c] === 1);
+      const support = new Uint8Array(game.grid.n);
+      for (let c = 0; c < game.grid.n; c++) {
+        support[c] = !game.grid.blocked[c] && !game.reserved[c] ? 1 : 0;
+      }
+      // DynamicCycle 检查精确支持集；TwoFactorCycle 的同名校验器会忽略额外参数，
+      // 其 present 支持集已由 insert/remove 事务维护。
+      const verify = coreDyn.verifyStructure as (n: number, expectedSupport?: Uint8Array) => string | null;
+      return verify.call(coreDyn, coreDyn.N, support) === null;
     };
+    // 预约期已经把候选回路提交为“落地后视图”；正式落地只需验证，无需再做一次
+    // 可能失败的重复重建。这样 grid 与回路不会在第二次构造失败时分叉。
+    scheduler.onBlocked = () => validateCommittedView();
     // unblock（grid 尚未 unblock 时调用）：预排重建——新回路包含将恢复的宏格
     scheduler.onUnblock = (macro: number): boolean => {
       if (!coreDyn) return false;
@@ -520,12 +528,8 @@ function hamiltonDyn(game: Game): Strategy {
         if (touched.length) game.grid.rebuildNeighbors();
       }
     };
-    // unblock 正式落地后：grid 已自由，正式重建对齐
-    scheduler.onUnblocked = (macro: number): boolean => {
-      if (!coreDyn) return false;
-      const occ = game.occ;
-      return coreDyn.insertBlock(macro, (c) => occ[c] === 1);
-    };
+    // onUnblock 已按未来自由视图完成预排；落地后只校验提交视图。
+    scheduler.onUnblocked = () => validateCommittedView();
   }
   let lastStep = -1;
   let anomalyStreak = 0;

@@ -173,7 +173,7 @@ interface InjectResult {
   coverage: Record<string, number>;
 }
 
-/** 事件结局汇总（跨注入项累计）：落地/预约拒绝/落地回滚/缝回放弃（观测调度器全结局空间） */
+/** 事件路径汇总（跨注入项累计）：落地/预约拒绝/落地回滚/解除重试。 */
 const outcomeTotals: Record<string, number> = {};
 /** 5 类违例桶的全局汇总（fault-test 全部局累计，验收要求每类探针活性 + 真实触发分布） */
 const violationCounts: Record<string, number> = {};
@@ -185,7 +185,7 @@ function runInjected(name: string, games: number, seed0: number, inject: (s: any
   let injections = 0;
   let reserveRejects = 0; // onReserve 返回 false 的次数（预约拒绝）
   let landRollbacks = 0; // onBlocked 返回 false 的次数（落地回滚，grid 已由调度器还原）
-  let unblockGives = 0; // unblock 重试超限放弃的次数（缝回放弃，障碍保持）
+  let unblockGives = 0; // onUnblock 返回 false 的重试次数（不等于最终放弃）
   // 覆盖度计数（不变量分支名 → 触发次数）：终局时逐局统计
   const coverage: Record<string, number> = {};
   const note = (k: string) => (coverage[k] = (coverage[k] ?? 0) + 1);
@@ -206,9 +206,7 @@ function runInjected(name: string, games: number, seed0: number, inject: (s: any
       sched.onReserve = (m: number) => { const ok = oReserve(m); if (!ok) reserveRejects++; return ok; };
       const oBlocked = sched.onBlocked;
       sched.onBlocked = (m: number) => { const ok = oBlocked(m); if (!ok) landRollbacks++; return ok; };
-      // 缝回放弃：onUnblock 返回 false 且事件最终被丢弃——通过 pending 里该事件消失且未落地观测，
-      // 简化口径：onUnblock false 计一次尝试，放弃在终局以「N 小于初始自由格」间接体现；
-      // 这里直接计 onUnblock 拒绝次数（重试语义：拒绝 ≤8 次内重试，超限放弃）。
+      // 解除重试：这里只统计 onUnblock false；最终放弃应读取 scheduler.stats.unblockAbandons。
       const oUnblock = sched.onUnblock;
       sched.onUnblock = (m: number) => { const ok = oUnblock(m); if (!ok) unblockGives++; return ok; };
     }
@@ -220,6 +218,7 @@ function runInjected(name: string, games: number, seed0: number, inject: (s: any
       if (!game.alive || game.won) break;
       if (game.stepsSinceFood > game.grid.freeCount * 6 + 100) game.fail('starved');
     }
+    if (game.alive && !game.won) game.fail('step-limit');
     if (game.won) wins++;
     // 终态合法：won，或已 die 且有明确原因
     if (game.won || (!game.alive && game.failReason !== 'none')) legalEnds++;
@@ -234,7 +233,9 @@ function runInjected(name: string, games: number, seed0: number, inject: (s: any
       if (dyn.walkCount > 0) note('分支:commitWalk');
       if (dyn.rollbackCount > 0) note('分支:rollback');
       // 覆盖度 e-4：结构校验违例按 5 类不变量分支计数（0 触发 = 该分支未被考验）
-      const err = dyn.verifyStructure(dyn.N);
+      const support = new Uint8Array(game.grid.n);
+      for (let c = 0; c < game.grid.n; c++) support[c] = !game.grid.blocked[c] && !game.reserved[c] ? 1 : 0;
+      const err = dyn.verifyStructure(dyn.N, support);
       if (err) {
         structureOk = false;
         const cls = classifyViolation(err);
@@ -245,19 +246,19 @@ function runInjected(name: string, games: number, seed0: number, inject: (s: any
         note('分支:结构校验通过');
       }
     }
-    // 覆盖度：调度器事件结局（落地成功/预约拒绝/落地回滚/缝回放弃）——回调包装处已计数
+    // 覆盖度：调度器事件路径（落地成功/预约拒绝/落地回滚/解除重试）
     if (sched) {
       if (sched.landSeq > 0) note('事件:落地');
       if (reserveRejects > 0) note('事件:预约拒绝');
       if (landRollbacks > 0) note('事件:落地回滚');
-      if (unblockGives > 0) note('事件:缝回放弃');
+      if (unblockGives > 0) note('事件:解除重试');
       outcomeTotals.落地 = (outcomeTotals.落地 ?? 0) + (sched.landSeq > 0 ? 1 : 0);
     }
     if (reserveRejects > 0) outcomeTotals.预约拒绝 = (outcomeTotals.预约拒绝 ?? 0) + 1;
     if (landRollbacks > 0) outcomeTotals.落地回滚 = (outcomeTotals.落地回滚 ?? 0) + 1;
-    if (unblockGives > 0) outcomeTotals.缝回放弃 = (outcomeTotals.缝回放弃 ?? 0) + 1;
+    if (unblockGives > 0) outcomeTotals.解除重试 = (outcomeTotals.解除重试 ?? 0) + 1;
     if (game.expiredFoods > 0) note('分支:食物过期');
-    if (dyn && dyn.N < game.initialFreeCount) note('分支:N小于初始自由格(事件放弃后继续)');
+    if (dyn && dyn.N < game.initialFreeCount) note('分支:当前回路小于初始自由格');
   }
   return { name, games, wins, legalEnds, structureOk, injections, coverage };
 }
@@ -389,7 +390,7 @@ function main(): void {
   // 事件结局空间（调度器全链路）：四类结局至少各触发一次才说明结局空间被完整考验
   console.log('');
   console.log('调度器事件结局空间（跨注入项累计局数）：');
-  const outcomeKeys = ['落地', '预约拒绝', '落地回滚', '缝回放弃'];
+  const outcomeKeys = ['落地', '预约拒绝', '落地回滚', '解除重试'];
   for (const k of outcomeKeys) {
     console.log(`  ${k.padEnd(6)} ×${outcomeTotals[k] ?? 0}`);
   }

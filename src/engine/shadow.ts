@@ -5,18 +5,16 @@
  * 已知的六个真 bug 恰好都在这一层。本文件提供一个 ~百行的朴素参照实现：
  *  - 每次断言时从 grid.blocked **从零重算**自由格集合（无任何增量状态）；
  *  - 用**独立实现**检查「热路径维护的链接图是自由格上的 2-正则单环」（O(N²) 允许，极慢但极简）；
- *  - 用 **canonical 归一化**比对两个回路（若影子重建出另一条合法回路）：取集合中
- *    index 最小的格作起点、正/反两个遍历方向取字典序较小者，得到规范化序列后逐位比对。
+ *  - 独立重建一条参考回路，并验证它在同一支持集上合法；参考回路允许与热路径形态不同。
  *
  * 四层等价断言（老师建议的粒度）：
  *  L1 同自由格集合：热路径 cells 集合 == 从 grid.blocked 重算的自由格集合（引擎层状态，严格）；
  *  L2 同 I1：影子独立检查「单环、2-正则、网格相邻」通过；
  *  L3 同 I2：蛇身格在环上序号尾→头严格单调；
- *  L4 cycle 语义等价：canonical 归一化后逐位相等。
+ *  L4 独立可构造性：参考实现能在同一支持集上重建出另一条合法回路。
  *
- * 注意：影子重算用的是**当前 grid**（含动态障碍），因此 L4 的语义是
- * 「热路径维护的回路确实是当前自由格上的一个合法哈密顿回路，且是影子唯一重建出的那条」——
- * 生成树法在自由格唯一时（同 seed 同布局）回路确定，故 L4 可逐位比对。
+ * 哈密顿回路通常不唯一。canonical 只能消除同一环的起点和方向差异，不能把不同合法环
+ * 归一成相同序列，因此精确分歧只作拓扑多样性观测，不作为正确性失败。
  */
 
 /** 影子：从 blocked 独立重算自由格集合 */
@@ -108,6 +106,34 @@ export function shadowCompareCycle(
     if (nHot[i] !== nShadow[i]) {
       return `canonical 序列在第 ${i} 位分歧: 热路径 ${nHot[i]} vs 影子 ${nShadow[i]}（同合法回路的不同形态，或维护错误）`;
     }
+  }
+  return null;
+}
+
+/** 独立验证一条回路序恰好覆盖 blocked 视图中的全部自由格。 */
+export function shadowCheckOrder(
+  order: number[] | null,
+  blocked: Uint8Array,
+  w: number,
+): string | null {
+  if (!order || order.length === 0) return '影子重建失败';
+  let free = 0;
+  for (let c = 0; c < blocked.length; c++) if (!blocked[c]) free++;
+  if (order.length !== free) return `影子回路长 ${order.length} != 自由格 ${free}`;
+  const seen = new Uint8Array(blocked.length);
+  for (let i = 0; i < order.length; i++) {
+    const c = order[i];
+    const nx = order[(i + 1) % order.length];
+    if (!Number.isInteger(c) || c < 0 || c >= blocked.length) return `影子格越界 ${c}`;
+    if (blocked[c]) return `影子回路包含障碍格 ${c}`;
+    if (seen[c]) return `影子回路重复格 ${c}`;
+    seen[c] = 1;
+    const dx = Math.abs((c % w) - (nx % w));
+    const dy = Math.abs(((c / w) | 0) - ((nx / w) | 0));
+    if (dx + dy !== 1) return `影子传送边 ${c}→${nx}`;
+  }
+  for (let c = 0; c < blocked.length; c++) {
+    if (!blocked[c] && !seen[c]) return `影子遗漏自由格 ${c}`;
   }
   return null;
 }

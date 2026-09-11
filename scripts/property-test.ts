@@ -20,7 +20,9 @@ import { buildHamiltonCycle } from '../src/engine/hamilton';
 const cfg = SCENARIOS.find((s) => s.id === 'extreme-dyn')!;
 
 function checkAll(dyn: DynamicCycle, game: Game): string | null {
-  const structErr = dyn.verifyStructure(dyn.N);
+  const expectedSupport = new Uint8Array(game.grid.n);
+  for (let c = 0; c < game.grid.n; c++) expectedSupport[c] = game.grid.blocked[c] ? 0 : 1;
+  const structErr = dyn.verifyStructure(dyn.N, expectedSupport);
   if (structErr) return `P1: ${structErr}`;
   for (let i = 0; i < dyn.N; i++) {
     const c = dyn.cells[i];

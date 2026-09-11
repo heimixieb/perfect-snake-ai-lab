@@ -2,6 +2,23 @@
   "name": "perfect-snake-ai-lab",
   "private": true,
   "version": "1.0.0",
+  "description": "A reproducible lab for certifying Snake AI on static and changing grids.",
+  "keywords": [
+    "snake-ai",
+    "hamiltonian-cycle",
+    "pathfinding",
+    "property-testing",
+    "typescript",
+    "algorithms"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/heimixieb/perfect-snake-ai-lab.git"
+  },
+  "homepage": "https://github.com/heimixieb/perfect-snake-ai-lab#readme",
+  "bugs": {
+    "url": "https://github.com/heimixieb/perfect-snake-ai-lab/issues"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,12 +27,13 @@
     "typecheck": "tsc --noEmit",
     "bench:static": "tsx scripts/bench.ts all 10 1000",
     "bench:dyn": "tsx scripts/bench-dyn.ts 100 7000",
+    "bench:dyn:correctness": "tsx scripts/bench-dyn.ts 20 7000 --correctness-only",
     "test:property": "tsx scripts/property-test.ts 10000 42",
     "test:shadow": "tsx scripts/shadow-test.ts 8 9000",
     "test:fault": "tsx scripts/fault-test.ts 40 8000",
     "test:a2": "tsx scripts/bench-dyn.ts 100 7000 --a2",
     "test:twofactor": "tsx scripts/twofactor-test.ts 50 7000",
-    "verify": "npm run typecheck && npm run test:property && npm run test:fault && npm run bench:dyn"
+    "verify": "npm run typecheck && npm run build && npm run test:property && npm run test:shadow && npm run test:fault && npm run test:twofactor && npm run bench:dyn:correctness"
   },
   "dependencies": {
     "clsx": "2.1.1",
@@ -35,7 +53,6 @@
     "vite-plugin-singlefile": "2.3.0",
     "tsx": "^4.23.13"
   },
-  "description": "贪吃蛇完美通关 AI：哈密顿回路 + 单调序捷径（可证明 100% 通关）+ 动态障碍增量维护 + certifying 校验器。含 6 个可复现验收脚本。",
   "engines": {
     "node": ">=20"
   }

@@ -754,8 +754,9 @@ export class TwoFactorCycle {
   /** 全量兜底（事件路径的唯一兜底，时间有界）：rebuildFn（生成树 O(N)，~0.3ms）。
    *  不走流变体——rebuildFn 失败（罕见 Prim 形态 8 seed 重试后仍失败）时流求解+
    *  原始多圈因子全合并实测 30–70ms，是 wall 降级尖峰的根因；且流变体在此场景
-   *  成功率有限。事件语义 = 增量修复 → 生成树重建（经典兜底）→ 拒绝，严格不劣于
-   *  经典引擎（拒绝条件与 DynamicCycle 完全一致）。流求解只用于 init（决策环外）。 */
+   *  成功率有限。事件语义 = 增量修复 → 生成树重建兜底 → 拒绝。专项对照显示该实现
+   *  仍可能在全量重建可接受时拒绝，因此它是更保守的实验路径，不能宣称严格不劣。
+   *  流求解只用于 init（决策环外）。 */
   private fullResolve(): boolean {
     this.stats.fallbacks++;
     if (this.rebuildFn) {

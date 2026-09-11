@@ -105,7 +105,7 @@ export const SCENARIOS: ScenarioConfig[] = [
   },
   {
     id: 'extreme-dyn-a2',
-    name: '极限难度 A2（动态宏格障碍，事件必须落地）',
+    name: '极限难度 A2-like（动态宏格障碍，公开筛选漏斗）',
     level: '极限',
     width: 30,
     height: 30,
@@ -120,7 +120,7 @@ export const SCENARIOS: ScenarioConfig[] = [
     dynPeriod: 40,
     dynNotice: 15,
     forceLand: true,
-    description: 'A2 对手档：障碍承诺必须落地（落在蛇头正前方亦可，不落蛇身），调度器不可拒绝候选；接受时做公平性三条件检查（逃逸集非空且 ≥2、T≥2、落地后连通且偶格）。注：设计稿中的「逃逸承诺」锁死模式未实装，当前通关由三条件 + 常规回路维护支撑。通关率仅记录不预设 100%。',
+    description: 'A2-like 过滤对手：候选可接近蛇头，先检查逃逸集、预告期与落地后连通性，再交给回路维护器。当前维护器仍可拒绝公平候选，因此不是严格“事件必须落地”的 A2；基准会公开完整候选漏斗。',
   } as ScenarioConfig,
 ];
 

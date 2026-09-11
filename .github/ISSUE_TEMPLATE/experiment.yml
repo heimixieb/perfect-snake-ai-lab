@@ -1,0 +1,24 @@
+name: Experiment proposal
+description: 提议新的算法、基准或反例实验
+title: "[Experiment]: "
+labels: [experiment]
+body:
+  - type: textarea
+    id: hypothesis
+    attributes:
+      label: 假设
+      description: 想验证或证伪什么？
+    validations:
+      required: true
+  - type: textarea
+    id: protocol
+    attributes:
+      label: 实验协议
+      description: 场景、策略、seed、样本量、指标公式和对照组。
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 验收条件
+      description: 哪些结果支持或否定假设？

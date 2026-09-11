@@ -13,13 +13,13 @@
  *   最脆弱窗口反而最稀疏；自适应把断言预算集中到落地后 1 步，其余时段减半到 50 步，
  *   总断言次数近似不变而覆盖价值显著上移。）
  *
- * 四层等价（L1 语义按「回路 ⊔ 预约位 = 自由集」修正——预约格处于 grid 未 block
+ * 四层验证（L1 语义按「回路 ⊔ 预约位 = 自由集」修正——预约格处于 grid 未 block
  * 但回路已排除的中间态，是设计行为而非错误）：
  *  L1 回路格集合 ⊔ 预约位集合 = 自由格集合（无第三种格）
  *  L2 影子独立检查单环/2-正则/网格相邻通过
  *  L3 影子独立验证蛇身单调弧
- *  L4 canonical 归一化后回路逐位相等；失败时二诊断：热路径提交回路按提交时
- *     grid（含 reserved 叠加）是否至少合法——合法则预期分歧记日志，非法则 fatal。
+ *  L4 独立重建在同一提交视图上也能构造合法回路。canonical 精确分歧只说明
+ *     两次构造选择了不同合法形态，不作为正确性失败。
  *
  * 独立性（老师 Q12 定案）：共享单次构造器 buildHamiltonCycle，
  * 重试编排与 acceptable 判据热路径/影子各自独立实现——影子存在就是为了和
@@ -35,6 +35,7 @@ import {
   shadowFreeSet,
   shadowCheckRing,
   shadowCompareCycle,
+  shadowCheckOrder,
   shadowCheckMonoArc,
 } from '../src/engine/shadow';
 
@@ -83,13 +84,12 @@ function main(): void {
 
     const maxSteps = game.grid.freeCount * game.grid.freeCount * 2 + 1000;
     let steps = 0;
-    let lastLandSeq = -1;
+    let lastLandSeq = 0;
     while (game.alive && !game.won && steps < maxSteps) {
       const next = strat.decide(game);
       game.step(next);
       steps++;
-      if (!game.alive || game.won) break;
-      if (game.stepsSinceFood > game.grid.freeCount * 6 + 100) game.fail('starved');
+      if (game.alive && !game.won && game.stepsSinceFood > game.grid.freeCount * 6 + 100) game.fail('starved');
       // 自适应频率：事件落地后 1 步必断言 + 平时每 50 步稳定点
       const curLandSeq = strat._scheduler ? strat._scheduler.landSeq : 0;
       const eventJustLanded = curLandSeq !== lastLandSeq;
@@ -139,31 +139,27 @@ function main(): void {
         continue;
       }
 
-      // ===== L4 canonical 等价 + 二诊断 =====
-      // 影子重算时叠加 reserved 视图（与热路径 rebuildFn 的预排语义对齐——预约格不在回路）
-      const cmpErr = shadowCompareCycle(dyn.cells, dyn.N, shadowRebuildWithRetry(), game.grid.freeCount);
-      if (cmpErr) {
-        // 二诊断：热路径提交的回路（按提交时 grid = 当前 grid + reserved 叠加）是否至少合法
-        const saved: number[] = [];
-        for (let c = 0; c < game.grid.n; c++) {
-          if (game.reserved[c] && !game.grid.blocked[c]) { game.grid.blocked[c] = 1; saved.push(c); }
-        }
-        if (saved.length) game.grid.rebuildNeighbors();
-        // 热路径回路在提交视图下应恰覆盖全部自由格（N = 叠加后自由格数）
-        const committedFree = game.grid.freeCount;
-        const committedOk = dyn.N === committedFree;
-        for (const c of saved) game.grid.blocked[c] = 0;
-        if (saved.length) game.grid.rebuildNeighbors();
-        if (committedOk) {
-          // 不同但都合法：预期分歧（多 seed 重试命中不同可构造形态），记日志继续
-          benignDivergences++;
-        } else {
-          failures++;
-          failDetails.push(`seed ${seed} step ${steps}: L4 真 bug——${cmpErr}；且提交回路长度 ${dyn.N} != 提交时自由格 ${committedFree}`);
-          continue;
-        }
+      // ===== L4 独立重建合法性 + 拓扑分歧观测 =====
+      const reference = shadowRebuildWithRetry();
+      const saved: number[] = [];
+      for (let c = 0; c < game.grid.n; c++) {
+        if (game.reserved[c] && !game.grid.blocked[c]) { game.grid.blocked[c] = 1; saved.push(c); }
       }
+      if (saved.length) game.grid.rebuildNeighbors();
+      const refErr = shadowCheckOrder(reference, game.grid.blocked, game.grid.w);
+      const committedFree = game.grid.freeCount;
+      const committedOk = dyn.N === committedFree;
+      const cmpErr = shadowCompareCycle(dyn.cells, dyn.N, reference, committedFree);
+      for (const c of saved) game.grid.blocked[c] = 0;
+      if (saved.length) game.grid.rebuildNeighbors();
+      if (refErr || !committedOk) {
+        failures++;
+        failDetails.push(`seed ${seed} step ${steps}: L4 ${refErr ?? `提交回路长 ${dyn.N} != ${committedFree}`}`);
+        continue;
+      }
+      if (cmpErr) benignDivergences++;
     }
+    if (game.alive && !game.won) game.fail('step-limit');
   }
 
   console.log(`影子 refinement 测试: ${games} 局, ${assertions} 次四层断言（事件后必断 ${eventAssertions} + 稳点 ${assertions - eventAssertions}）, 真失败 ${failures}, 预期分歧 ${benignDivergences}`);
@@ -171,7 +167,7 @@ function main(): void {
     for (const d of failDetails.slice(0, 10)) console.error('  ' + d);
     process.exit(1);
   }
-  console.log('L1 回路⊔预约=自由集 / L2 单环 / L3 单调弧 / L4 canonical 等价（含二诊断）全部通过 ✅');
+  console.log('L1 支持集 / L2 单环 / L3 单调弧 / L4 独立重建合法性全部通过 ✅');
 }
 
 main();

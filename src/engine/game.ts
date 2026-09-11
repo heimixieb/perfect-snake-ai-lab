@@ -105,8 +105,21 @@ export class Game {
   }
   /** 开局自由格数（C 性质的分母锚点，不随对手删格变化） */
   readonly initialFreeCount: number;
-  /** 违反 N（不饿死）的次数：食物过期时其所在连通分量与蛇所在分量相同（或含蛇可达格） */
-  nViolations = 0;
+  /**
+   * 食物到期时，在「障碍 + 预约位 + 当前蛇身」静态快照中仍可从蛇头到达的次数。
+   *
+   * 这是诊断信号，不是不饿死（liveness）证明：静态可达不代表能在 TTL 内吃到，
+   * 当前蛇身暂时阻断也不代表结构性不可达。
+   */
+  expiredReachableSnapshot = 0;
+  /** 食物到期时，在同一静态快照中不可达的次数。 */
+  expiredUnreachableSnapshot = 0;
+  /** 因障碍落地而被移除的食物数；与自然 TTL 到期分开统计。 */
+  foodsRemovedByObstacle = 0;
+  /** @deprecated 兼容旧报告字段；请使用 expiredReachableSnapshot。 */
+  get nViolations(): number {
+    return this.expiredReachableSnapshot;
+  }
 
   /** 新口径 V：visited ∩ 当前自由集 / 当前自由集（≤100%，被障碍覆盖的旧到访格不计入） */
   get coverageCurrent(): number {
@@ -120,8 +133,8 @@ export class Game {
     return free === 0 ? 1 : vis / free;
   }
 
-  /** N 检查：食物过期时判定其是否属于「蛇可达分量」（BFS 分量连通性） */
-  private checkNOnExpire(cell: number): void {
+  /** 记录食物自然到期时的静态快照可达性（仅作诊断，不作为 N 性质证明）。 */
+  private recordExpiryReachability(cell: number): void {
     if (!this.alive) return;
     // 蛇头所在分量 BFS（当前 blocked + occ + reserved 视图）
     const head = this.head;
@@ -131,8 +144,7 @@ export class Game {
     while (stack.length) {
       const cur = stack.pop()!;
       if (cur === cell) {
-        // 食物与蛇连通 → 过期即违反 N
-        this.nViolations++;
+        this.expiredReachableSnapshot++;
         return;
       }
       const x = cur % this.grid.w;
@@ -147,7 +159,7 @@ export class Game {
         stack.push(j);
       }
     }
-    // 不连通 → 结构隔离，计入 structural_L（不算 N 违反）
+    this.expiredUnreachableSnapshot++;
   }
 
   private pushHead(c: number) {
@@ -196,7 +208,8 @@ export class Game {
       if (fi >= 0) {
         this.removeFood(fi);
         this.expiredFoods++;
-        this.checkNOnExpire(c); // 预约位语义下不应发生（食物不生成在预约格），防御性记录
+        // 障碍删除食物不是 TTL 到期，不能混入快照可达性统计。
+        this.foodsRemovedByObstacle++;
       }
       this.grid.blocked[c] = 1;
     }
@@ -239,6 +252,10 @@ export class Game {
   /** 执行一步：next 为蛇头将进入的格子（-1 表示策略放弃） */
   step(next: number) {
     if (!this.alive || this.won) return;
+    if (!Number.isInteger(next) || next < 0 || next >= this.grid.n) {
+      this.die('no-move');
+      return;
+    }
     this.steps++;
     if (next < 0) return this.die('no-move');
     const head = this.head;
@@ -267,7 +284,7 @@ export class Game {
     // 食物过期
     for (let i = this.foods.length - 1; i >= 0; i--) {
       if (this.foods[i].expiresAt <= this.steps) {
-        this.checkNOnExpire(this.foods[i].cell); // N 检查：过期时食物是否与蛇连通
+        this.recordExpiryReachability(this.foods[i].cell);
         this.removeFood(i);
         this.expiredFoods++;
       }

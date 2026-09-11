@@ -89,8 +89,9 @@ function t1Unit(scenarioId: string, seeds: number): void {
 /* ---------------------------------------------------------------- */
 interface T2Stats {
   events: number;
-  agree: number;
-  disagree: number;
+  exactAgree: number;
+  tfOnly: number;
+  rebuildOnly: number;
   tfAccept: number;
   rebuildAccept: number;
   bothReject: number;
@@ -120,9 +121,9 @@ function tfStatsSummary(tf: any): Record<string, number> {
 }
 
 function t2Dynamic(seeds: number, seed0: number): void {
-  console.log(`\n== T2 动态事件回归（extreme-dyn × ${seeds} seeds：b 增量 vs 生成树全量重建逐事件对齐）==`);
+  console.log(`\n== T2 动态事件差分观测（extreme-dyn × ${seeds} seeds：b 增量 vs 生成树全量重建）==`);
   const cfg = getScenario('extreme-dyn');
-  const agg: T2Stats = { events: 0, agree: 0, disagree: 0, tfAccept: 0, rebuildAccept: 0, bothReject: 0 };
+  const agg: T2Stats = { events: 0, exactAgree: 0, tfOnly: 0, rebuildOnly: 0, tfAccept: 0, rebuildAccept: 0, bothReject: 0 };
   const baselineMs: number[] = [];
   const tfMs: number[] = [];
   for (let i = 0; i < seeds; i++) {
@@ -188,16 +189,15 @@ function t2Dynamic(seeds: number, seed0: number): void {
         if (cyc && cyc.length === game.grid.freeCount) refOk = true;
       }
       baselineMs.push(performance.now() - t1);
-      // 一致性断言（2-factor 存在性 ⟺ 生成树可构造，在宏格对齐布局上应恒一致；
-      // 少数生成树自检失败但 2-factor 存在的形态，b 判接受而 ref 判拒绝——记录为「b 严格优」不算失败）
-      const agree = tfOk === refOk || (tfOk && !refOk);
+      // 差分观测：两个构造器都不是存在性判定器，接受集合不必相同；四种结果分别计数。
       agg.events++;
       if (tfOk) agg.tfAccept++;
       if (refOk) agg.rebuildAccept++;
       if (!tfOk && !refOk) agg.bothReject++;
-      if (agree) agg.agree++;
-      else {
-        agg.disagree++;
+      if (tfOk === refOk) agg.exactAgree++;
+      else if (tfOk) agg.tfOnly++;
+      else agg.rebuildOnly++;
+      if (tfOk !== refOk && agg.tfOnly + agg.rebuildOnly <= 10) {
         console.error(`  ⚠ seed ${seed} e${e} ${isBlock ? 'block' : 'unblock'} m=${m}: tf=${tfOk} ref=${refOk}`);
       }
       // tf 接受时结构必须双过
@@ -223,7 +223,7 @@ function t2Dynamic(seeds: number, seed0: number): void {
       check(`T2 s${seed} e${e} 回滚后结构完好`, se2 === null, se2 ?? '');
     }
   }
-  console.log(`  事件 ${agg.events}：判定一致/严格优 ${agg.agree}，分歧 ${agg.disagree}；tf 接受 ${agg.tfAccept}，重建接受 ${agg.rebuildAccept}，双拒 ${agg.bothReject}`);
+  console.log(`  事件 ${agg.events}：精确一致 ${agg.exactAgree}，仅 2-factor 接受 ${agg.tfOnly}，仅全量重建接受 ${agg.rebuildOnly}；tf 接受 ${agg.tfAccept}，重建接受 ${agg.rebuildAccept}，双拒 ${agg.bothReject}`);
   // b 引擎内部统计（热点定位：repairFails/fallbacks 高 = 增量路径失败率问题）
   console.log(`  b 统计: ${JSON.stringify(tfStatsSummary(lastTf))}`);
   const med = (a: number[]) => {

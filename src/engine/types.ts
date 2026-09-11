@@ -25,7 +25,7 @@ export const STRATEGIES: StrategyInfo[] = [
   { id: 'hamilton', name: '纯哈密顿回路', short: 'Hamilton', color: '#8b5cf6' },
   { id: 'hamilton-shortcut', name: '哈密顿回路 + 捷径', short: 'Ham+Shortcut', color: '#10b981' },
   { id: 'hybrid', name: '混合（推荐）：有回路走捷径回路，否则安全 A*', short: 'Hybrid', color: '#ec4899' },
-  { id: 'hamilton-dyn', name: '动态障碍回路：叶子公司缝合 + p99 超时降级安全优先', short: 'Ham+Dyn', color: '#22d3ee' },
+  { id: 'hamilton-dyn', name: '动态障碍回路：事务重建 + p99 保险丝降级', short: 'Ham+Dyn', color: '#22d3ee' },
   { id: 'manual', name: '手动控制（方向键 / WASD，演示用，不参与基准）', short: 'Manual', color: '#94a3b8' },
 ];
 
@@ -68,7 +68,7 @@ export interface ScenarioConfig {
   dynPeriod?: number;
   /** 预告期（步）：预约位在落地前多少步标记，策略期内即可规避 */
   dynNotice?: number;
-  /** A2 对手档：事件必须落地（调度器不可拒绝候选，接受时做公平性三条件检查） */
+  /** A2-like 过滤对手：允许近头候选并做公平性检查；当前维护器仍可拒绝候选。 */
   forceLand?: boolean;
 }
 
@@ -79,6 +79,7 @@ export type FailReason =
   | 'obstacle'
   | 'starved'
   | 'no-move'
+  | 'maintenance'
   | 'step-limit';
 
 export interface GameResult {

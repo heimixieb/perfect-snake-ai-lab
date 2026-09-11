@@ -1,17 +1,11 @@
 /**
  * 动态障碍下的可维护哈密顿回路（极限难度 extreme-dyn）。
  *
- * 表示：回路 = 自由格上的 2-正则连通环，{next, prev} 双向映射，所有链接都是网格相邻格。
- * 宏格（2×2）内部 4 格构成小环 a→b→d→c→a；树边 = 打开两宏格相对的环边并交叉连接（叶子公司）。
+ * 表示：回路 = 提交支持集上的 2-正则连通环，{next, prev} 双向映射，所有链接均为网格相邻格。
  *
- * 动态维护的关键性质：所有拼接都在「同一宏格的同一侧」内进行，拼接两端必然网格相邻，
- * 绝不产生跨块"传送边"（那是蛇身弧被拉断、蛇原地徘徊的根源）。
- *
- * - removeBlock（宏格将变障碍）：对每条张开侧，邻居侧恰有一个 out-end（next 指入被摘格）
- *   和一个 in-end（prev 来自被摘格），二者相邻 → 直连闭合。每次 O(4) 拼接 + O(N) walk 校验。
- * - unblock 场景：障碍恢复后不强行缝回（保持 N < 全图也可通关），周期性调度自动触发；
- *   若要 100% 覆盖可在残局走一次全量重建（见 rebuildFromGrid）。
- * walk 校验失败则快照回滚并拒绝本次变动，回路永远处于已验证的单环状态。
+ * 经典维护路径在宏格预约、落地和解除时执行 O(N) 生成树全量重建。新回路先写入候选数组，
+ * 完成唯一性、邻接、单环与蛇身单调弧检查后才原子提交；失败保留旧状态。
+ * 可选的 TwoFactorCycle 实验引擎在另一个模块中探索局部增广修复，不改变本类的事务语义。
  */
 import { Game } from './game';
 import { RNG, mixSeed } from './rng';
@@ -61,8 +55,15 @@ export class DynamicCycle {
       if (game.grid.blocked[a]) this.macroBlocked[m] = 1;
     }
   }
-  /** 结构校验器：2-正则、单环覆盖 N 格、全部链接网格相邻、idx 与 next 一致。返回违例描述或 null */
-  verifyStructure(expectedN: number): string | null {
+  /**
+   * 结构校验器：2-正则、单环、网格相邻、cells/idx/next/prev 互相一致。
+   * expectedSupport 可选；传入时还会逐格验证回路支持集完全相等。
+   */
+  verifyStructure(expectedN: number, expectedSupport?: Uint8Array): string | null {
+    if (!Number.isInteger(expectedN) || expectedN <= 0 || expectedN > this.next.length) {
+      return `非法期望长度 ${expectedN}`;
+    }
+    if (expectedSupport && expectedSupport.length !== this.next.length) return '支持集长度不匹配';
     // 1) 单环：从任一链接格沿 next 走一圈
     let start = -1;
     for (let c = 0; c < this.next.length; c++) {
@@ -74,52 +75,110 @@ export class DynamicCycle {
     if (start < 0) return '无链接格';
     let c = start;
     let count = 0;
+    const seen = new Uint8Array(this.next.length);
     do {
+      if (c < 0 || c >= this.next.length) return `后继越界 ${c}`;
+      if (seen[c]) return `提前重复格 ${c}`;
+      seen[c] = 1;
       const nx = this.next[c];
-      if (nx < 0) return `格 ${c} 无后继`;
+      if (nx < 0 || nx >= this.next.length) return `格 ${c} 后继越界 ${nx}`;
       // 2) 链接网格相邻
       const dx = Math.abs((c % this.w) - (nx % this.w));
       const dy = Math.abs(((c / this.w) | 0) - ((nx / this.w) | 0));
       if (dx + dy !== 1) return `传送边 ${c}→${nx}`;
       if (this.prev[nx] !== c) return `prev 不一致 ${nx}`;
       count++;
-      if (count > this.next.length) return '环过长';
+      if (count > expectedN) return '环过长或未回到起点';
       c = nx;
     } while (c !== start);
-    // 3) 覆盖：所有 idx>=0 的格都在环上且无第二个环
+    // 3) 覆盖与字段一致性：不能存在环外链接、悬空 prev/idx 或错误序号。
     let linked = 0;
     for (let x = 0; x < this.next.length; x++) {
-      if (this.next[x] >= 0) {
+      const hasNext = this.next[x] >= 0;
+      const hasPrev = this.prev[x] >= 0;
+      const hasIdx = this.idx[x] >= 0;
+      if (hasNext !== hasPrev || hasNext !== hasIdx) return `格 ${x} 链接字段不完整`;
+      if (expectedSupport && hasNext !== (expectedSupport[x] === 1)) return `支持集不一致 ${x}`;
+      if (hasNext) {
         linked++;
-        if (this.idx[x] < 0) return `格 ${x} 在环外（第二环）`;
-      } else if (this.idx[x] >= 0) {
-        return `格 ${x} idx 越环`;
+        if (!seen[x]) return `格 ${x} 在环外（第二环）`;
+        const pos = this.idx[x];
+        if (pos < 0 || pos >= expectedN) return `格 ${x} 序号越界 ${pos}`;
+        if (this.cells[pos] !== x) return `cells/idx 不互逆 ${x}`;
       }
     }
     if (count !== expectedN || linked !== expectedN) return `覆盖 ${count}/${expectedN}`;
+    if (this.cells.length < expectedN) return `cells 长度 ${this.cells.length} < ${expectedN}`;
+    for (let i = 0; i < expectedN; i++) {
+      const x = this.cells[i];
+      if (x < 0 || x >= this.next.length) return `cells[${i}] 越界 ${x}`;
+      if (this.idx[x] !== i) return `序号错乱 cells[${i}]=${x}, idx=${this.idx[x]}`;
+      if (this.next[x] !== this.cells[(i + 1) % expectedN]) return `idx 与 next 不一致 ${x}`;
+      if (this.prev[x] !== this.cells[(i - 1 + expectedN) % expectedN]) return `idx 与 prev 不一致 ${x}`;
+    }
     return null;
   }
 
   /** 用初始回路序初始化链接并推导 opened 掩码 */
   init(order: number[]): boolean {
-    this.N = order.length;
-    this.cells = Int32Array.from(order);
-    order.forEach((c, i) => {
-      this.idx[c] = i;
-      this.next[c] = order[(i + 1) % this.N];
-      this.prev[c] = order[(i - 1 + this.N) % this.N];
-    });
-    // 推导 opened：环向序对 (u,v)，若 next[u]===v 或 next[v]===u 则该侧闭合
+    const candidate = this.makeCandidate(order);
+    if (!candidate) return false;
+    this.commitCandidate(candidate);
+    this.walkCount++;
+    return true;
+  }
+
+  private makeCandidate(order: number[]): {
+    N: number;
+    cells: Int32Array;
+    idx: Int32Array;
+    next: Int32Array;
+    prev: Int32Array;
+    opened: Uint8Array;
+    macroBlocked: Uint8Array;
+  } | null {
+    const N = order.length;
+    if (N <= 0 || N > this.next.length) return null;
+    const cells = Int32Array.from(order);
+    const idx = new Int32Array(this.next.length).fill(-1);
+    const next = new Int32Array(this.next.length).fill(-1);
+    const prev = new Int32Array(this.next.length).fill(-1);
+    for (let i = 0; i < N; i++) {
+      const c = order[i];
+      const nx = order[(i + 1) % N];
+      if (!Number.isInteger(c) || c < 0 || c >= this.next.length || idx[c] >= 0) return null;
+      const dx = Math.abs((c % this.w) - (nx % this.w));
+      const dy = Math.abs(((c / this.w) | 0) - ((nx / this.w) | 0));
+      if (dx + dy !== 1) return null;
+      idx[c] = i;
+      next[c] = nx;
+      prev[c] = order[(i - 1 + N) % N];
+    }
+    const opened = new Uint8Array(this.mw * this.mh);
+    const macroBlocked = new Uint8Array(this.mw * this.mh);
+    // 推导 opened：环向序对 (u,v)，若 next[u]===v 或 next[v]===u 则该侧闭合。
     for (let m = 0; m < this.mw * this.mh; m++) {
-      if (this.macroBlocked[m]) continue;
+      const a = macroTL(this.w, this.mw, m);
+      macroBlocked[m] = idx[a] < 0 ? 1 : 0;
+      if (macroBlocked[m]) continue;
       let mask = 0;
       for (let s = 0; s < 4; s++) {
         const [u, v] = this.sideCells(m, s);
-        if (this.next[u] !== v && this.next[v] !== u) mask |= 1 << s;
+        if (next[u] !== v && next[v] !== u) mask |= 1 << s;
       }
-      this.opened[m] = mask;
+      opened[m] = mask;
     }
-    return this.verifyWalk();
+    return { N, cells, idx, next, prev, opened, macroBlocked };
+  }
+
+  private commitCandidate(candidate: NonNullable<ReturnType<DynamicCycle['makeCandidate']>>): void {
+    this.N = candidate.N;
+    this.cells = candidate.cells;
+    this.idx = candidate.idx;
+    this.next = candidate.next;
+    this.prev = candidate.prev;
+    this.opened = candidate.opened;
+    this.macroBlocked = candidate.macroBlocked;
   }
 
   /** 宏格 m 的 side 侧两格（环向序对 u→v） */
@@ -133,44 +192,11 @@ export class DynamicCycle {
     }
   }
 
-  /** 沿 next 走一圈重编号；校验单环覆盖全部链接格。失败返回 false（调用方回滚） */
-  private rewalk(): boolean {
-    this.walkCount++;
-    let start = -1;
-    for (let c = 0; c < this.next.length; c++) {
-      if (this.next[c] >= 0) {
-        start = c;
-        break;
-      }
-    }
-    if (start < 0) return false;
-    this.idx.fill(-1);
-    let c = start;
-    let i = 0;
-    do {
-      this.idx[c] = i;
-      this.cells[i] = c;
-      i++;
-      c = this.next[c];
-      if (i > this.N) return false;
-    } while (c !== start);
-    if (i !== this.N) return false;
-    for (let x = 0; x < this.next.length; x++) {
-      if (this.next[x] >= 0 && this.idx[x] < 0) return false; // 存在第二个环
-    }
-    return true;
-  }
-
-  private verifyWalk(): boolean {
-    return this.rewalk();
-  }
-
   /**
-   * 摘除宏格 m（grid.blocked 已更新后调用）：全量重建回路（O(N)）。
+   * 摘除宏格 m（调用方提供目标 grid/预约视图）：全量重建回路（O(N)）。
    * 为何不用 O(1) 段折叠：2×2 宏格被环穿越的段，其两端外侧格在 4-邻接下必不相邻
    * （直边穿 1 格 → 两端列差 3；对角穿 2 格 → 对角），直连必产生传送边（实测多次）。
-   * 生成树重建 O(N)≈900 格 < 0.1ms，在 2ms 预算内且正确性可证明（verifyStructure 把关）。
-   * 状态来源：macroBlocked 直接从 game 的 blocked 位图推导，调用前 grid 必须已更新。
+   * 具体耗时由运行环境决定；正确性由候选校验与 verifyStructure 把关。
    */
   removeBlock(m: number, isSnakeCell: (c: number) => boolean): boolean {
     const cells = this.macroCellListOf(m);
@@ -196,33 +222,19 @@ export class DynamicCycle {
     if (!this.rebuildFn) return false;
     const order = this.rebuildFn();
     if (!order || order.length === 0) return false;
-    if (this.monoArcChecker && !this.monoArcChecker(order)) return false;
-    this.N = order.length;
-    this.cells = Int32Array.from(order);
-    this.idx.fill(-1);
-    // 清空全部旧链接：新回路可能不含旧格子（N 缩短/格子变更），残留 next/prev 会被
-    // verifyStructure 判为「环外第二环」（实测 remove 1 失败路径根因）
-    this.next.fill(-1);
-    this.prev.fill(-1);
-    order.forEach((c, i) => {
-      this.idx[c] = i;
-      this.next[c] = order[(i + 1) % this.N];
-      this.prev[c] = order[(i - 1 + this.N) % this.N];
-    });
-    this.walkCount++;
-    // macroBlocked 与 opened 统一从当前回路/grid 重推导
-    for (let mm = 0; mm < this.mw * this.mh; mm++) {
-      const a = macroTL(this.w, this.mw, mm);
-      this.macroBlocked[mm] = this.idx[a] < 0 ? 1 : 0;
-      if (this.macroBlocked[mm]) { this.opened[mm] = 0; continue; }
-      let mask = 0;
-      for (let s = 0; s < 4; s++) {
-        const [u, v] = this.sideCells(mm, s);
-        if (this.next[u] !== v && this.next[v] !== u) mask |= 1 << s;
-      }
-      this.opened[mm] = mask;
+    if (this.monoArcChecker && !this.monoArcChecker(order)) {
+      this.rollbackCount++;
+      return false;
     }
-    return this.verifyStructure(this.N) === null;
+    // 先在候选数组上完成全部校验，再一次性替换正式状态；失败不会污染旧回路。
+    const candidate = this.makeCandidate(order);
+    if (!candidate) {
+      this.rollbackCount++;
+      return false;
+    }
+    this.commitCandidate(candidate);
+    this.walkCount++;
+    return true;
   }
 }
 
@@ -248,6 +260,8 @@ export class DegradeController {
   reason: DegradeReason = 'none';
   /** 墙钟判据的连续超标窗口计数（去抖：连续 2 窗口才降级） */
   private wallOverStreak = 0;
+  /** 自上次墙钟窗口判定后新增的样本数；墙钟只比较互不重叠的完整窗口。 */
+  private wallSamplesSinceCheck = 0;
   private walks: number[] = [];
   private wall: number[] = [];
 
@@ -260,12 +274,14 @@ export class DegradeController {
   }
   sample(ms: number, walks = 0) {
     if (this.degraded) {
-      // 降级观察期：记录 walk spike 供滞回恢复判定（连续无 spike 达 recoverySteps 才恢复）
-      if (walks > this.budgetWalks) this.recoveryWalkSpikes++;
+      // 恢复使用连续干净样本，而不是“降级以来从未出现过 spike”的永久锁死条件。
+      if (walks <= this.budgetWalks / 2) this.recoveryCleanSteps++;
+      else this.recoveryCleanSteps = 0;
       return;
     }
     this.wall.push(ms);
     if (this.wall.length > this.windowSize) this.wall.shift();
+    this.wallSamplesSinceCheck++;
     this.walks.push(walks);
     if (this.walks.length > this.windowSize) this.walks.shift();
   }
@@ -280,20 +296,24 @@ export class DegradeController {
     if (this.walks.length < this.windowSize) return false;
     const spikes = this.walks.filter((w) => w > this.budgetWalks).length;
     if (spikes > this.spikeRatio * this.windowSize) return this.trip('walks', step);
-    if (DegradeController.p99(this.wall) > this.wallBudgetMs) {
-      // 墙钟去抖：单窗口超标可能是 GC/JIT 尖峰（rebuild p99 实测 ~2.3ms，偶发越线）。
-      // 连续 2 个窗口 p99 都超标才降级——慢环境仍会触发，单次尖峰不再误伤。
-      this.wallOverStreak++;
-      if (this.wallOverStreak >= 2) return this.trip('wall', step);
-      return false;
+    // 只在收满一个新的、互不重叠的窗口后更新墙钟连续超标计数。
+    // 这样一个尖峰不会因为仍留在滑动窗口里而被重复计算两次。
+    if (this.wallSamplesSinceCheck >= this.windowSize) {
+      this.wallSamplesSinceCheck = 0;
+      if (DegradeController.p99(this.wall) > this.wallBudgetMs) {
+        this.wallOverStreak++;
+        if (this.wallOverStreak >= 2) return this.trip('wall', step);
+        return false;
+      }
+      this.wallOverStreak = 0;
     }
-    this.wallOverStreak = 0;
     return false;
   }
   private trip(r: DegradeReason, step: number): boolean {
     this.degraded = true;
     this.reason = r;
     this.degradeStep = step;
+    this.recoveryCleanSteps = 0;
     return true;
   }
   /** 外部强制降级（拓扑连续异常 / 验收自检） */
@@ -302,23 +322,26 @@ export class DegradeController {
       this.degraded = true;
       this.reason = reason;
       this.degradeStep = step;
+      this.recoveryCleanSteps = 0;
     }
   }
   /**
-   * 滞回恢复（d-4）：降级后若连续 recoveryWindows 个窗口的确定性判据（walks）
+   * 滞回恢复（d-4）：降级后若连续 recoverySteps 个样本的确定性判据（walks）
    * 全部低于预算的 1/2，则恢复捷径——防止长对抗局永久禁捷径把步数推到饥饿阈值附近。
    * 墙钟不参与恢复判定（不可复现）。恢复后 re-degrade 仍可能发生（滞回对称）。
    */
-  tryRecover(step: number): boolean {
+  tryRecover(_step: number): boolean {
     if (!this.degraded || this.reason === 'anomaly' || this.reason === 'forced') return false;
-    // 滞回：降级后经过 recoverySteps 步且期间无新 walk spike 才恢复
-    if (step - this.degradeStep >= this.recoverySteps && this.recoveryWalkSpikes === 0) {
+    // 滞回：连续 recoverySteps 个样本低于 walk 预算的一半后恢复。
+    if (this.recoveryCleanSteps >= this.recoverySteps) {
       this.degraded = false;
       this.reason = 'none';
       this.degradeStep = -1;
       this.walks = [];
       this.wall = [];
       this.wallOverStreak = 0;
+      this.wallSamplesSinceCheck = 0;
+      this.recoveryCleanSteps = 0;
       this.recovered = true;
       return true;
     }
@@ -326,8 +349,8 @@ export class DegradeController {
   }
   /** 降级后需保持的恢复步数（滞回带宽度） */
   readonly recoverySteps = 200;
-  /** 恢复观察期内记录的 walk spike 数 */
-  recoveryWalkSpikes = 0;
+  /** 恢复观察期内连续低负载样本数。 */
+  recoveryCleanSteps = 0;
   /** 是否发生过恢复（观测用） */
   recovered = false;
   /** 恢复后仍需记录 spike：sample 在非 degraded 时正常工作，恢复后自动重新累积 */
@@ -340,6 +363,20 @@ export class DegradeController {
 /* ------------------------------------------------------------------ */
 /* 动态障碍调度器（策略每步 tick；block 预约→落地，unblock 立即生效）     */
 /* ------------------------------------------------------------------ */
+export interface SchedulerStats {
+  sampledCandidates: number;
+  environmentRejects: number;
+  fairnessRejects: number;
+  strategyRejects: number;
+  reservations: number;
+  gridTouches: number;
+  committedEvents: number;
+  landRollbacks: number;
+  bodyConflicts: number;
+  unblockRetries: number;
+  unblockAbandons: number;
+}
+
 export class DynScheduler {
   private pending: Array<{ atStep: number; kind: 'block' | 'unblock'; macro: number; cells: number[]; tries: number; backoff: number }> = [];
   private rng: RNG;
@@ -356,8 +393,21 @@ export class DynScheduler {
    *  纯观测计数器，零行为影响；影子断言自适应频率据此在「落地后 1 步」必断言——
    *  重建提交后的第一步是拓扑最脆弱时刻，断言价值最高。 */
   landSeq = 0;
+  readonly stats: SchedulerStats = {
+    sampledCandidates: 0,
+    environmentRejects: 0,
+    fairnessRejects: 0,
+    strategyRejects: 0,
+    reservations: 0,
+    gridTouches: 0,
+    committedEvents: 0,
+    landRollbacks: 0,
+    bodyConflicts: 0,
+    unblockRetries: 0,
+    unblockAbandons: 0,
+  };
 
-  /** A2 对手档：事件必须落地（候选不可拒，公平性三条件在接受时刻检查） */
+  /** A2-like 过滤档：启用近头候选与公平性检查；策略拒绝会被 stats 显式记录。 */
   readonly forceLand: boolean;
   constructor(
     private game: Game,
@@ -379,23 +429,34 @@ export class DynScheduler {
       if (e.kind === 'block') {
         // 预约位保证蛇身不会进入；若已在其上（理论不可能）则丢弃事件
         if (e.cells.some((c) => g.occ[c])) {
+          this.stats.bodyConflicts++;
           for (const c of e.cells) g.unreserveCell(c);
           this.pending.splice(i, 1);
+          if (this.forceLand) g.fail('maintenance');
           continue;
         }
         // 时序：applyBlock（grid 更新）→ onBlocked 重排回路 → 失败则回滚 grid 放弃事件
         g.applyBlock(e.cells);
         this.landSeq++;
+        this.stats.gridTouches++;
         if (!this.onBlocked(e.macro)) {
+          this.stats.landRollbacks++;
           g.applyUnblock(e.cells);
+          this.landSeq++;
+          this.stats.gridTouches++;
+          // block 前的预排已把宏格移出回路；grid 回滚后必须把回路也恢复到完整支持集。
+          if (!this.onUnblocked(e.macro)) g.fail('maintenance');
           this.pending.splice(i, 1);
           continue;
         }
+        this.stats.committedEvents++;
       } else {
         // unblock 时序：onUnblock 预排（grid 未变，重建包含将恢复的宏格）→ applyUnblock → onUnblocked 对齐
         e.tries++;
         if (!this.onUnblock(e.macro)) {
+          this.stats.unblockRetries++;
           if (e.tries > 8) {
+            this.stats.unblockAbandons++;
             for (const c of e.cells) g.unreserveCell(c);
             this.pending.splice(i, 1);
             continue;
@@ -406,7 +467,19 @@ export class DynScheduler {
         }
         g.applyUnblock(e.cells);
         this.landSeq++;
-        this.onUnblocked(e.macro);
+        this.stats.gridTouches++;
+        if (!this.onUnblocked(e.macro)) {
+          // 正式对齐失败：恢复 grid，并把回路恢复到旧的 blocked 视图；事件保留以便重试。
+          this.stats.landRollbacks++;
+          g.applyBlock(e.cells);
+          this.landSeq++;
+          this.stats.gridTouches++;
+          if (!this.onBlocked(e.macro)) g.fail('maintenance');
+          e.backoff = Math.min(e.backoff * 2, 320);
+          e.atStep = g.steps + e.backoff;
+          continue;
+        }
+        this.stats.committedEvents++;
       }
       this.pending.splice(i, 1);
     }
@@ -479,18 +552,22 @@ export class DynScheduler {
     };
     for (let tries = 0; tries < 32 && expensiveTries < MAX_EXPENSIVE; tries++) {
       const m = this.rng.int(mw * (g.grid.h / 2));
-      if (this.macroIsBlockedOrReserved(m)) continue;
+      this.stats.sampledCandidates++;
+      if (this.macroIsBlockedOrReserved(m)) { this.stats.environmentRejects++; continue; }
       const cells = this.macroCellList(m);
-      if (cells.some((c) => g.grid.blocked[c] || g.occ[c] || g.foodAt[c] >= 0 || g.reserved[c])) continue;
+      if (cells.some((c) => g.grid.blocked[c] || g.occ[c] || g.foodAt[c] >= 0 || g.reserved[c])) {
+        this.stats.environmentRejects++;
+        continue;
+      }
       const cx = cells.reduce((s, c) => s + g.grid.x(c), 0) / 4;
       const cy = cells.reduce((s, c) => s + g.grid.y(c), 0) / 4;
       const nearHead = Math.abs(hx - cx) + Math.abs(hy - cy) < 8;
       // A1 档（可拒绝候选）：距蛇头过近或割点 → 跳过（零重建成本）
       if (!this.forceLand) {
-        if (nearHead) continue;
-        if (isCutVertex(m)) continue;
+        if (nearHead) { this.stats.environmentRejects++; continue; }
+        if (isCutVertex(m)) { this.stats.environmentRejects++; continue; }
       } else {
-        // A2 档（事件必须落地）：候选不可拒，但公平性三条件在「接受时刻」检查：
+        // A2-like 档：允许近头候选，并在交给维护器前检查公平性三条件：
         // ① 预约集不得覆盖蛇头现阶段全部合法后继（逃逸集非空且 ≥ 2）
         // ② 预告期 T ≥ 2（构造保证 notice=15）
         // ③ 落地后自由区保持连通（isCutVertex 在宏格粒度检查；连通即接受）
@@ -505,14 +582,15 @@ export class DynScheduler {
             if (g.reserved[c]) continue;
             escape++;
           }
-          if (escape < 2) continue; // 公平性①不满足 → 本候选不可接受（换一个位置）
+          if (escape < 2) { this.stats.fairnessRejects++; continue; }
         }
-        if (isCutVertex(m)) continue; // 公平性③（宏格粒度）：拆除后不连通 → 接受会破坏 C
+        if (isCutVertex(m)) { this.stats.fairnessRejects++; continue; }
       }
       expensiveTries++;
-      if (!this.onReserve(m)) continue; // 回路拆除失败（连通性等）→ 换一个
+      if (!this.onReserve(m)) { this.stats.strategyRejects++; continue; }
       for (const c of cells) g.reserveCell(c);
       this.pending.push({ atStep: g.steps + this.notice, kind: 'block', macro: m, cells, tries: 0, backoff: 5 });
+      this.stats.reservations++;
       return;
     }
   }

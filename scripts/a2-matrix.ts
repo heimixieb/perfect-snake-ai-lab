@@ -1,5 +1,5 @@
 /**
- * A2 档压力矩阵：把「事件必须落地」档（extreme-dyn-a2，forceLand）的通关率与
+ * A2-like 档压力矩阵：允许近头候选，并公开“候选→公平性→策略→提交”的完整漏斗。
  * 崩溃边界标定到与 A1 压力矩阵同等的严谨度。
  *
  * 8 组合 = 预告期 5/15 × 变动数 2/4 × 密度 0.08/0.12（与 A1 矩阵同轴同值），
@@ -12,10 +12,8 @@
  *  - 崩溃边界定义：通关率 <100% 的组合须给出失败原因分布；任何组合出现
  *    非法终态/结构污染/死锁（步数爆表且 alive）即为崩溃。
  *
- * 事件链计数（A2 特有，观测「接受→落地→结局」漏斗）：
- *  - 落地事件数（landSeq 增量）：grid 被对手真实触碰的次数；
- *  - 事件后回滚：onBlocked 返回 false → applyUnblock 放弃（A2 中放弃 = 对手得分口径的落空，
- *    由调度器回滚 grid 保证安全，计入优雅降级而非崩溃）。
+ * 重要：当前实现仍允许维护器拒绝公平候选，所以它不是严格“事件必须落地”的 A2。
+ * 脚本把策略拒绝显式列出，防止只展示成功落地数而隐藏前置筛选。
  *  注：d-3 设计中的「逃逸承诺模式」未实装（引擎只有接受时刻公平性三条件），
  *  故本脚本不统计逃逸模式启用面——A2 的 100% 由三条件 + 常规回路步进支撑。
  *
@@ -43,6 +41,11 @@ interface ComboResult {
   failDist: Record<string, number>;
   landings: number;
   landRollbacks: number;
+  sampledCandidates: number;
+  fairnessRejects: number;
+  strategyRejects: number;
+  reservations: number;
+  committedEvents: number;
 }
 
 function runCombo(notice: number, count: number, density: number, games: number, seed0: number): ComboResult {
@@ -62,6 +65,11 @@ function runCombo(notice: number, count: number, density: number, games: number,
   let cRateSum = 0;
   let landings = 0;
   let landRollbacks = 0;
+  let sampledCandidates = 0;
+  let fairnessRejects = 0;
+  let strategyRejects = 0;
+  let reservations = 0;
+  let committedEvents = 0;
   let overBudgetSteps = 0;
   let totalSteps = 0;
   const allDecideMs: number[] = [];
@@ -72,7 +80,7 @@ function runCombo(notice: number, count: number, density: number, games: number,
     const game = new Game(cfg, seed);
     const strat = createStrategy('hamilton-dyn', game) as any;
     const dyn = strat._dyn;
-    const sched = strat._scheduler as { landSeq: number; onBlocked: (m: number) => boolean } | undefined;
+    const sched = strat._scheduler as (import('../src/engine/dyn').DynScheduler) | undefined;
     const land0 = sched ? sched.landSeq : 0;
     // 包装落地回调统计「落地后回滚」：onBlocked 返回 false → 调度器 applyUnblock 放弃事件
     if (sched) {
@@ -93,17 +101,27 @@ function runCombo(notice: number, count: number, density: number, games: number,
       game.step(next);
       if (game.alive && !game.won && game.stepsSinceFood > game.freeCells * 6 + 100) game.fail('starved');
     }
+    if (game.alive && !game.won) game.fail('step-limit');
     // 事件链计数：landSeq = grid 被对手真实触碰次数（含落地后回滚）；landRollbacks 由
     // onBlocked 包装统计（A2 中放弃 = 优雅降级，回滚 grid 保证安全，非崩溃）。
-    if (sched) landings += sched.landSeq - land0;
+    if (sched) {
+      landings += sched.landSeq - land0;
+      sampledCandidates += sched.stats.sampledCandidates;
+      fairnessRejects += sched.stats.fairnessRejects;
+      strategyRejects += sched.stats.strategyRejects;
+      reservations += sched.stats.reservations;
+      committedEvents += sched.stats.committedEvents;
+    }
     totalSteps += game.steps;
     if (game.won) wins++;
     if (game.won || (!game.alive && game.failReason !== 'none')) legalEnds++;
     else failDist['非法终态'] = (failDist['非法终态'] ?? 0) + 1;
     if (!game.won) failDist[game.failReason] = (failDist[game.failReason] ?? 0) + 1;
-    if (game.alive && !game.won) deadlock++; // 步数爆表仍活着 = 死锁
+    if (game.failReason === 'step-limit') deadlock++;
     if (dyn) {
-      const err = dyn.verifyStructure(dyn.N);
+      const support = new Uint8Array(game.grid.n);
+      for (let c = 0; c < game.grid.n; c++) support[c] = !game.grid.blocked[c] && !game.reserved[c] ? 1 : 0;
+      const err = dyn.verifyStructure(dyn.N, support);
       if (!err) structureOk++;
       else console.error(`  seed ${seed} 结构污染: ${err}`);
     }
@@ -117,13 +135,15 @@ function runCombo(notice: number, count: number, density: number, games: number,
     cRate: cRateSum / games,
     p50: q(0.5), p99: q(0.99), max: s.length ? s[s.length - 1] : 0,
     overBudgetSteps, totalSteps, failDist, landings, landRollbacks,
+    sampledCandidates, fairnessRejects, strategyRejects, reservations, committedEvents,
   };
 }
 
 function main(): void {
   const games = Number(process.argv[2] ?? 100);
   const seed0 = Number(process.argv[3] ?? 7000);
-  console.log(`== A2 档压力矩阵（extreme-dyn-a2 · forceLand · 每组合 ${games} 局，seed ${seed0}..）==`);
+  console.log(`== A2-like 过滤对手压力矩阵（extreme-dyn-a2 · 每组合 ${games} 局，seed ${seed0}..）==`);
+  console.log('注意：维护器仍可拒绝公平候选；本脚本公开拒绝数，不把它包装成严格“事件必须落地”。');
   console.log('轴：预告期 5/15 × 变动数 2/4 × 密度 0.08/0.12（与 A1 矩阵同轴）\n');
 
   const combos: Array<[number, number, number]> = [];
@@ -141,10 +161,10 @@ function main(): void {
       `合法终态 ${r.legalEnds}/${r.games}`,
       `结构完好 ${r.structureOk}/${r.games}`,
       `死锁 ${r.deadlock}`,
-      `C ${(r.cRate * 100).toFixed(1)}%`,
+      `初始容量 ${(r.cRate * 100).toFixed(1)}%`,
       `p50 ${r.p50.toFixed(3)} p99 ${r.p99.toFixed(3)} 峰 ${r.max.toFixed(2)}ms`,
       `超预算 ${(r.overBudgetSteps / Math.max(1, r.totalSteps) * 100).toFixed(3)}%`,
-      `落地事件 ${r.landings}（回滚放弃 ${r.landRollbacks}）`,
+      `提交 ${r.committedEvents}（grid触碰 ${r.landings} / 策略拒绝 ${r.strategyRejects} / 回滚 ${r.landRollbacks}）`,
       collapsed ? '❌' : (r.wins === r.games ? '✅' : '⚠'),
     );
     const dist = Object.entries(r.failDist).map(([k, v]) => `${k}×${v}`).join(' ');
@@ -164,7 +184,13 @@ function main(): void {
   console.log(`  全矩阵 p99 峰值 ${worstP99.toFixed(3)}ms（预算 2ms）`);
   const landTotal = results.reduce((a, r) => a + r.landings, 0);
   const rollbackTotal = results.reduce((a, r) => a + r.landRollbacks, 0);
-  console.log(`  事件落地总次数 ${landTotal}（回滚放弃 ${rollbackTotal}；forceLand 档：候选不可拒，落地即对手真实触碰 grid）`);
+  const sampledTotal = results.reduce((a, r) => a + r.sampledCandidates, 0);
+  const fairnessTotal = results.reduce((a, r) => a + r.fairnessRejects, 0);
+  const strategyTotal = results.reduce((a, r) => a + r.strategyRejects, 0);
+  const reservedTotal = results.reduce((a, r) => a + r.reservations, 0);
+  const committedTotal = results.reduce((a, r) => a + r.committedEvents, 0);
+  console.log(`  候选漏斗：抽样 ${sampledTotal} → 公平性过滤 ${fairnessTotal} → 策略拒绝 ${strategyTotal} → 预约 ${reservedTotal} → 提交 ${committedTotal}`);
+  console.log(`  grid 触碰 ${landTotal}（含回滚触碰；事件回滚 ${rollbackTotal}）`);
   if (collapsed.length) process.exit(1);
   console.log('\n判定：✅ 全组合终态合法 + 结构完好 + 无死锁（崩溃边界 = 无崩溃；通关率边界见上）');
 }
